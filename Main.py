@@ -2,7 +2,7 @@ import os
 import argparse
 import DataManager
 import utils
-from Learner import learner
+from Learner import DDPGLearner
 
 
 """
@@ -29,10 +29,10 @@ from Learner import learner
 
 if __name__ == "__main__":
   parser = argparse.ArgumentParser()
-  parser.add_argument("--stock_code", nargs="+", default= ["010140", "000810", "034220"])
-  parser.add_argument("--lr", type=float, default=1e-4)
+  parser.add_argument("--stock_code", nargs="+", default= ["010140", "005930", "034220"])
+  parser.add_argument("--lr", type=float, default=1e-6)
   parser.add_argument("--tau", type=float, default=0.005)
-  parser.add_argument("--delta", type=float, default=0.0)
+  parser.add_argument("--delta", type=float, default=0.005)
   parser.add_argument("--discount_factor", type=float, default=0.9)
   parser.add_argument("--num_episode", type=int, default=50)
   parser.add_argument("--balance", type=int, default=15000000)
@@ -64,7 +64,7 @@ train_data, test_data = DataManager.get_data_tensor(path_list,
 
 # # 최소/최대 투자 가격 설정
 min_trading_price = 0
-max_trading_price = args.balance / len(args.stock_code)
+max_trading_price = 500000
 
 # 파라미터 설정
 params = {"lr":args.lr, "tau":args.tau, "K":len(args.stock_code), "delta":args.delta,
@@ -73,7 +73,7 @@ params = {"lr":args.lr, "tau":args.tau, "K":len(args.stock_code), "delta":args.d
           "batch_size":args.batch_size, "memory_size":args.memory_size}
 
 # 학습/테스트 수행
-learner = learner(**params)
+learner = DDPGLearner(**params)
 learner.run(num_episode=args.num_episode, balance=args.balance)
 learner.save_model(critic_path=utils.SAVE_DIR + "/Models" + "/DDPGPortfolio_critic.pth",
                    actor_path=utils.SAVE_DIR + "/Models" + "/DDPGPortfolio_actor.pth")

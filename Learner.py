@@ -8,16 +8,16 @@ from ReplayMemory import ReplayMemory
 from Noise import OUProcess
 from Noise import Normal
 from Network import Actor
-from Network import Critic
+from Network import Qnet
 from Metrics import Metrics
 
-class learner:
 
+class DDPGLearner:
     def __init__(self,
                  tau=0.005, delta=0.05,
                  discount_factor=0.90,
                  batch_size=30, memory_size=100,
-                 chart_data=None, K=None, lr=1e-4,
+                 chart_data=None, K=None, lr=1e-6,
                  min_trading_price=None, max_trading_price=None):
 
         assert min_trading_price >= 0
@@ -31,14 +31,16 @@ class learner:
 
         self.actor = Actor(K=K)
         self.actor_target = Actor(K=K)
-        self.critic = Critic(K=K)
-        self.critic_target = Critic(K=K)
+        self.critic = Qnet(K=K)
+        self.critic_target = Qnet(K=K)
 
         self.actor_target.load_state_dict(self.actor.state_dict())
         self.critic_target.load_state_dict(self.critic.state_dict())
+        self.actor_target.eval()
+        self.critic_target.eval()
 
         self.ou_noise = OUProcess(np.zeros(K))
-        self.normal_noise = Normal(mu=0, std=0.1, size=K)
+        self.normal_noise = Normal(mu=0, std=0.03, size=K)
 
         self.lr = lr
         self.tau = tau
@@ -103,19 +105,17 @@ class learner:
             state1 = self.environment.observe()
             portfolio = self.agent.portfolio
             while True:
-                action_, confidence = self.agent.get_action(torch.tensor(state1).float().view(1, self.K, -1),
-                                                            torch.tensor(portfolio).float().view(1, self.K+1, -1))
-
-                ou_noise = self.ou_noise()
+                action, confidence = self.agent.get_action(torch.tensor(state1).float().view(1, self.K, -1),
+                                                           torch.tensor(portfolio).float().view(1, self.K+1, -1))
                 no_noise = self.normal_noise()
-                # action_ = action_ + no_noise
-                action = action_.clip(-1.0, 1.0)
-                next_state1, next_portfolio, reward, done = self.agent.step(action, confidence)
-                steps_done += 1
+                action = action + no_noise
+                action = action.clip(-0.033, 0.033)
+                m_action, next_state1, next_portfolio, reward, done = self.agent.step(action, confidence)
 
+                steps_done += 1
                 experience = (torch.tensor(state1).float().view(1, self.K, -1),
                               torch.tensor(portfolio).float().view(1, self.K+1, -1),
-                              torch.tensor(action).float().view(1, -1),
+                              torch.tensor(m_action).float().view(1, -1),
                               torch.tensor(reward).float().view(1,-1),
                               torch.tensor(next_state1).float().view(1, self.K, -1),
                               torch.tensor(next_portfolio).float().view(1, self.K+1, -1),
@@ -127,14 +127,16 @@ class learner:
                 portfolio = next_portfolio
 
                 if steps_done % 300 == 0:
+                    self.agent.critic.eval()
                     q_value = self.agent.critic(torch.tensor(state1).float().view(1, self.K, -1),
                                                 torch.tensor(portfolio).float().view(1, self.K+1, -1),
                                                 torch.tensor(action).float().view(1, -1)).detach().numpy()[0]
-
+                    self.agent.critic.train()
                     a = action
                     p = self.agent.portfolio
                     pv = self.agent.portfolio_value
                     sv = self.agent.portfolio_value_static
+                    stocks = self.agent.num_stocks
                     balance = self.agent.balance
                     change = self.agent.change
                     pi_vector = self.agent.pi_operator(change)
@@ -144,8 +146,10 @@ class learner:
                     print(f"price:{self.environment.get_price()}")
                     print(f"q_value:{q_value}")
                     print(f"noise:{no_noise}")
-                    print(f"action_:{action_}")
                     print(f"action:{a}")
+                    print(f"maction:{m_action}")
+                    print(f"gap:{a-m_action}")
+                    print(f"stocks:{stocks}")
                     print(f"portfolio:{p}")
                     print(f"pi_vector:{pi_vector}")
                     print(f"portfolio value:{pv}")
@@ -162,7 +166,7 @@ class learner:
                 if len(self.memory) >= self.batch_size:
                     sampled_exps = self.memory.sample(self.batch_size)
                     sampled_exps = self.prepare_training_inputs(sampled_exps)
-                    self.agent.update(*sampled_exps)
+                    self.agent.update(*sampled_exps, steps_done)
                     self.agent.soft_target_update(self.agent.critic.parameters(), self.agent.critic_target.parameters())
                     self.agent.soft_target_update(self.agent.actor.parameters(), self.agent.actor_target.parameters())
 

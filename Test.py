@@ -7,11 +7,10 @@ from Metrics import Metrics
 from Environment import environment
 from Agent import agent
 from Network import Actor
-from Network import Critic
-from Network import Score
+from Network import Qnet
 
 if __name__ == "__main__":
-    stock_code = ["010140", "000810", "034220"]
+    stock_code = ["010140", "005930", "034220"]
 
     path_list = []
     for code in stock_code:
@@ -31,31 +30,21 @@ if __name__ == "__main__":
     K = 3
 
     #Test Model load
-    # score_net_actor = Score()
-    # score_net_critic = Score()
-    # actor = Actor(score_net_actor)
-    # actor_target = Actor(score_net_actor)
-    # critic = Critic(score_net_critic)
-    # critic_target = Critic(score_net_critic)
-
-    actor = Actor()
-    actor_target = Actor()
-    critic = Critic()
-    critic_target = Critic()
+    actor = Actor(K=K)
+    actor_target = Actor(K=K)
+    critic = Qnet(K=K)
+    critic_target = Qnet(K=K)
 
     balance = 15000000
     min_trading_price = 0
-    max_trading_price = 5000000
+    max_trading_price = 500000
 
     #Agent
     environment = environment(chart_data=test_data)
     agent = agent(environment=environment,
-                  actor=actor,
-                  actor_target=actor_target,
-                  critic=critic,
-                  critic_target=critic_target,
-                  critic_lr=1e-3, actor_lr=1e-3,
-                  tau=0.005, discount_factor=0.9, delta=0.0,
+                  actor=actor, actor_target=actor_target,
+                  critic=critic, critic_target=critic_target, K=K,
+                  lr=1e-3, tau=0.005, discount_factor=0.9, delta=0.005,
                   min_trading_price=min_trading_price,
                   max_trading_price=max_trading_price)
 
@@ -79,7 +68,7 @@ if __name__ == "__main__":
         action, confidence = agent.get_action(torch.tensor(state1).float().view(1, K, -1),
                                               torch.tensor(portfolio).float().view(1, K+1, -1))
 
-        next_state1, next_portfolio, reward, done = agent.step(action, confidence)
+        _, next_state1, next_portfolio, reward, done = agent.step(action, confidence)
 
         steps_done += 1
         state1 = next_state1
@@ -89,78 +78,46 @@ if __name__ == "__main__":
         metrics.profitlosses.append(agent.profitloss)
 
         if steps_done % 50 == 0:
-            a = action
-            p = agent.portfolio
-            pv = agent.portfolio_value
-            sv = agent.portfolio_value_static
-            b = agent.balance
-            change = agent.change
-            pi_vector = agent.pi_operator(change)
-            profitloss = agent.profitloss
-            np.set_printoptions(precision=4, suppress=True)
-            # print("------------------------------------------------------------------------------------------")
-            # print(f"price:{environment.get_price()}")
-            # print(f"q_value:{q_value}")
-            # print(f"action:{a}")
-            # print(f"portfolio:{p}")
-            # print(f"pi_vector:{pi_vector}")
-            # print(f"portfolio value:{pv}")
-            # print(f"static value:{sv}")
-            print(f"balance:{b}")
-            # print(f"profitloss:{profitloss}")
-            # print("-------------------------------------------------------------------------------------------")
-
+            print(f"balance:{agent.balance}")
+            print(f"stocks:{agent.num_stocks}")
+            print(f"actions:{action}")
+            print(f"portfolio:{agent.portfolio}")
         if done:
+            print(f"model{agent.profitloss}")
             break
 
-    bench_profitloss1 = []
+    #Benchmark: B&H
     agent.set_balance(15000000)
     agent.reset()
     agent.environment.reset()
-    state1 = agent.environment.observe()
-    portfolio = agent.portfolio
-    steps_done = 0
-    while True:
-        steps_done += 1
-        action = np.array([0.33, 0.33, 0.33])
-
-        confidence = abs(action)
-        next_state1, next_portfolio, reward, done = agent.step(action, confidence)
-        steps_done += 1
-
-        state1 = next_state1
-        portfolio = next_portfolio
-        bench_profitloss1.append(agent.profitloss)
-        if done:
-            break
-
-
-    bench_profitloss2 = []
-    agent.set_balance(15000000)
-    agent.reset()
-    agent.environment.reset()
+    agent.delta = 0.0
     state1 = agent.environment.observe()
     portfolio = agent.portfolio
     while True:
-        action = np.random.uniform(low=-0.1, high=0.1, size=3)
+        action = np.ones(K)/K
         confidence = abs(action)
-        next_state1, next_portfolio, reward, done = agent.step(action, confidence)
-        steps_done += 1
+        _, next_state1, next_portfolio, reward, done = agent.step(action, confidence)
 
         state1 = next_state1
         portfolio = next_portfolio
-        bench_profitloss2.append(agent.profitloss)
+        metrics.profitlosses_BH.append(agent.profitloss)
         if done:
+            print(f"B&H{agent.profitloss}")
             break
+
 
     Vsave_path2 = utils.SAVE_DIR + "/" + "/Metrics" + "/Portfolio Value Curve_test"
     Vsave_path4 = utils.SAVE_DIR + "/" + "/Metrics" + "/Profitloss Curve_test"
     Msave_path1 = utils.SAVE_DIR + "/" + "/Metrics" + "/Portfolio Value_test"
-    Msave_path3 = utils.SAVE_DIR + "/" + "/Metrics" + "/Profitloss_test"
+    Msave_path2 = utils.SAVE_DIR + "/" + "/Metrics" + "/Profitloss_test"
+    Msave_path3 = utils.SAVE_DIR + "/" + "/Metrics" + "/Profitloss B&H"
+    Msave_path4 = utils.SAVE_DIR + "/" + "/Metrics" + "/Balances"
 
     metrics.get_portfolio_values(save_path=Msave_path1)
-    metrics.get_profitlosses(save_path=Msave_path3)
+    metrics.get_profitlosses(save_path=Msave_path2)
+    metrics.get_profitlosses_BH(save_path=Msave_path3)
+    metrics.get_balances(save_path=Msave_path4)
 
     Visualizer.get_portfolio_value_curve(metrics.portfolio_values, save_path=Vsave_path2)
-    Visualizer.get_profitloss_curve(metrics.profitlosses, bench_profitloss1, save_path=Vsave_path4)
+    Visualizer.get_profitloss_curve(metrics.profitlosses,  metrics.profitlosses_BH, save_path=Vsave_path4)
 

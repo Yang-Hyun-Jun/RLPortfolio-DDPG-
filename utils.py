@@ -9,3 +9,8 @@ def sigmoid(x):
 
 def exp(x):
     return np.exp(x)
+
+if __name__ == "__main__":
+    import torch
+    a = torch.rand(size=(1, 3))
+    print(torch.softmax(a, dim=1))
