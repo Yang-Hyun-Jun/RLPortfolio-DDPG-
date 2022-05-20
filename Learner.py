@@ -40,7 +40,7 @@ class DDPGLearner:
         self.critic_target.eval()
 
         self.ou_noise = OUProcess(np.zeros(K))
-        self.normal_noise = Normal(mu=0, std=0.03, size=K)
+        self.normal_noise = Normal(mu=0, std=0.05, size=K)
 
         self.lr = lr
         self.tau = tau
@@ -108,7 +108,7 @@ class DDPGLearner:
                 action, confidence = self.agent.get_action(torch.tensor(state1).float().view(1, self.K, -1),
                                                            torch.tensor(portfolio).float().view(1, self.K+1, -1))
                 no_noise = self.normal_noise()
-                action = action + no_noise
+                # action = action + no_noise
                 action = action.clip(-0.033, 0.033)
                 m_action, next_state1, next_portfolio, reward, done = self.agent.step(action, confidence)
 
