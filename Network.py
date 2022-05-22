@@ -9,9 +9,7 @@ class Actor(nn.Module):
 
         self.layer_s = nn.Linear(state1_dim + state2_dim, 64)
         self.layer1 = nn.Linear(64*K, 128)
-        self.bn1 = nn.BatchNorm1d(128)
         self.layer2 = nn.Linear(128, 64)
-        self.bn2 = nn.BatchNorm1d(64)
         self.layer3 = nn.Linear(64, 3)
         self.hidden_act = nn.ReLU()
 
@@ -39,8 +37,11 @@ class Actor(nn.Module):
         x = self.layer2(x)
         x = self.hidden_act(x)
         x = self.layer3(x)
-        action = torch.tensor(0.033) * torch.tanh(x)
-        return action
+
+        cash_bias = torch.ones(size=(x.shape[0],1)) * 0.1
+        x = torch.cat([cash_bias, x], dim=-1)
+        portfolio = torch.softmax(x, dim=-1)
+        return portfolio
 
 
 class Qnet(nn.Module):
@@ -50,11 +51,9 @@ class Qnet(nn.Module):
 
         # header
         self.layer_s = nn.Linear(state1_dim + state2_dim, 64)
-        self.layer_a = nn.Linear(K, 64)
+        self.layer_a = nn.Linear(K+1, 64)
         self.layer1 = nn.Linear(64*(K+1), 128)
-        self.bn1 = nn.BatchNorm1d(128)
         self.layer2 = nn.Linear(128, 64)
-        self.bn2 = nn.BatchNorm1d(64)
         self.layer3 = nn.Linear(64, 1)
         self.hidden_act = nn.ReLU()
 

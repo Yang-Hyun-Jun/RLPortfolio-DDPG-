@@ -30,7 +30,7 @@ from Learner import DDPGLearner
 if __name__ == "__main__":
   parser = argparse.ArgumentParser()
   parser.add_argument("--stock_code", nargs="+", default= ["010140", "005930", "034220"])
-  parser.add_argument("--lr", type=float, default=1e-6)
+  parser.add_argument("--lr", type=float, default=1e-8)
   parser.add_argument("--tau", type=float, default=0.005)
   parser.add_argument("--delta", type=float, default=0.005)
   parser.add_argument("--discount_factor", type=float, default=0.9)

@@ -65,10 +65,10 @@ if __name__ == "__main__":
     steps_done = 0
 
     while True:
-        action, confidence = agent.get_action(torch.tensor(state1).float().view(1, K, -1),
-                                              torch.tensor(portfolio).float().view(1, K+1, -1))
+        action, trading, confidence = agent.get_action(torch.tensor(state1).float().view(1, K, -1),
+                                                       torch.tensor(portfolio).float().view(1, K+1, -1))
 
-        _, next_state1, next_portfolio, reward, done = agent.step(action, confidence)
+        _, next_state1, next_portfolio, reward, done = agent.step(trading, confidence)
 
         steps_done += 1
         state1 = next_state1
@@ -77,7 +77,7 @@ if __name__ == "__main__":
         metrics.portfolio_values.append(agent.portfolio_value)
         metrics.profitlosses.append(agent.profitloss)
 
-        if steps_done % 50 == 0:
+        if steps_done % 1 == 0:
             print(f"balance:{agent.balance}")
             print(f"stocks:{agent.num_stocks}")
             print(f"actions:{action}")
@@ -94,9 +94,9 @@ if __name__ == "__main__":
     state1 = agent.environment.observe()
     portfolio = agent.portfolio
     while True:
-        action = np.ones(K)/K
-        confidence = abs(action)
-        _, next_state1, next_portfolio, reward, done = agent.step(action, confidence)
+        trading = np.ones(K)/K
+        confidence = abs(trading)
+        _, next_state1, next_portfolio, reward, done = agent.step(trading, confidence)
 
         state1 = next_state1
         portfolio = next_portfolio

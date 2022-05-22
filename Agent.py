@@ -1,6 +1,8 @@
 import torch
 import torch.nn as nn
 import numpy as np
+from Noise import OUProcess
+from Noise import Normal
 
 class agent(nn.Module):
     # TRADING_CHARGE = 0.00015
@@ -50,6 +52,8 @@ class agent(nn.Module):
         self.balance = 0
         self.profitloss = 0
 
+        self.ou_noise = OUProcess(np.zeros(K))
+        self.normal_noise = Normal(mu=0, std=0.05, size=K+1)
 
     def set_balance(self, balance):
         self.initial_balance = balance
@@ -65,29 +69,32 @@ class agent(nn.Module):
     def get_action(self, state1, portfolio):
         with torch.no_grad():
             self.actor.eval()
+            noise = self.normal_noise()
             action = self.actor(state1, portfolio).numpy()[0]
-            confidence = abs(action)
+            trading = (action - self.portfolio)[1:]
+            action = action + noise
+            confidence = abs(trading)
             self.actor.train()
-        return action, confidence
+        return action, trading, confidence
 
     def decide_trading_unit(self, confidence, price):
         trading_amount = self.portfolio_value * confidence
         trading_unit = int(np.array(trading_amount) / price)
         return trading_unit
 
-    def validate_action(self, action, delta):
-        m_action = action.copy()
-        for i in range(action.shape[0]):
-            if delta < action[i] <= 1:
+    def validate_action(self, trading, delta):
+        m_trading = trading.copy()
+        for i in range(trading.shape[0]):
+            if delta < trading[i] <= 1:
                 # 매수인 경우 적어도 1주를 살 수 있는지 확인
                 if self.balance < self.environment.get_price()[i] * (1 + self.TRADING_CHARGE):
-                    m_action[i] = 0.0 #Hold
+                    m_trading[i] = 0.0 #Hold
 
-            elif -1 <= action[i] < -delta:
+            elif -1 <= trading[i] < -delta:
                 # 매도인 경우 주식 잔고가 있는지 확인
                 if self.num_stocks[i] == 0:
-                    m_action[i] = 0.0 #Hold
-        return m_action
+                    m_trading[i] = 0.0 #Hold
+        return m_trading
 
     def pi_operator(self, change_rate):
         pi_vector = np.zeros(len(change_rate) + 1)
@@ -115,23 +122,23 @@ class agent(nn.Module):
         reward = (pv-pv_static)/pv_static
         return reward
 
-    def step(self, action, confidence):
-        assert action.shape[0] == confidence.shape[0]
+    def step(self, trading, confidence):
+        assert trading.shape[0] == confidence.shape[0]
         assert 0 <= self.delta < 1
 
         fee = 0
         close_p1 = self.environment.get_price()
-        m_action = self.validate_action(action, self.delta)
+        m_trading = self.validate_action(trading, self.delta)
         self.portfolio_value_static_ = self.portfolio * self.portfolio_value
 
         #우선 전체적으로 종목별 매도 수행을 먼저한다.
-        for i in range(m_action.shape[0]):
+        for i in range(m_trading.shape[0]):
             p1_price = close_p1[i]
 
-            if abs(m_action[i]) > 1.0:
+            if abs(m_trading[i]) > 1.0:
                 raise Exception("Action is out of bound")
             # Sell
-            if -1 <= m_action[i] < -self.delta:
+            if -1 <= m_trading[i] < -self.delta:
                 cost = self.TRADING_CHARGE + self.TRADING_TEX
                 trading_unit = self.decide_trading_unit(confidence[i], p1_price)
                 trading_unit = min(trading_unit, self.num_stocks[i])
@@ -142,17 +149,17 @@ class agent(nn.Module):
                 self.balance += invest_amount * (1-cost)
                 self.portfolio[0] += invest_amount * (1-cost)/self.portfolio_value
                 self.portfolio[i+1] -= invest_amount/self.portfolio_value
-                m_action[i] = -invest_amount/self.portfolio_value
+                m_trading[i] = -invest_amount/self.portfolio_value
 
 
         #다음으로 종목별 매수 수행
-        for i in range(m_action.shape[0]):
+        for i in range(m_trading.shape[0]):
             p1_price = close_p1[i]
 
-            if abs(m_action[i]) > 1.0:
+            if abs(m_trading[i]) > 1.0:
                 raise Exception("Action is out of bound")
             # Buy
-            if self.delta < m_action[i] <= 1:
+            if self.delta < m_trading[i] <= 1:
                 cost = self.TRADING_CHARGE
                 trading_unit = self.decide_trading_unit(confidence[i], p1_price)
                 cal_balance = (self.balance - p1_price * trading_unit * (1+cost))
@@ -169,10 +176,10 @@ class agent(nn.Module):
                 self.balance -= invest_amount * (1+cost)
                 self.portfolio[0] -= invest_amount * (1+cost)/self.portfolio_value
                 self.portfolio[i+1] += invest_amount/self.portfolio_value
-                m_action[i] = +invest_amount/self.portfolio_value
+                m_trading[i] =+ invest_amount/self.portfolio_value
 
-            elif -self.delta <= m_action[i] <= self.delta:
-                m_action[i] = 0.0
+            elif -self.delta <= m_trading[i] <= self.delta:
+                m_trading[i] = 0.0
 
         """
         거래로 인한 PV와 PF 변동 계산
@@ -201,7 +208,7 @@ class agent(nn.Module):
             done = 1
         else:
             done = 0
-        return m_action, next_state1, next_portfolio, reward, done
+        return m_trading, next_state1, next_portfolio, reward, done
 
     def update(self, s_tensor, portfolio, action, reward, ns_tensor, ns_portfolio, done, steps_done):
         with torch.no_grad():
@@ -215,7 +222,7 @@ class agent(nn.Module):
         self.critic_loss.backward()
         self.critic_optimizer.step()
 
-        if steps_done % 10 == 0:
+        if steps_done % 2 == 0:
             self.actor_loss = -self.critic(s_tensor, portfolio, self.actor(s_tensor, portfolio)).mean()
             self.actor_optimizer.zero_grad()
             self.actor_loss.backward()
